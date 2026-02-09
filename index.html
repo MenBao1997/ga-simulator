@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>GATCG 极简小团体模拟器</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1b1e; color: #eee; margin: 0; padding: 10px; display: flex; flex-direction: column; height: 100vh; }
+        #setup { background: #2c2e33; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+        textarea { width: 100%; height: 60px; background: #383a40; color: white; border: 1px solid #444; }
+        
+       .game-area { flex-grow: 1; display: grid; grid-template-columns: 150px 1fr; gap: 20px; }
+       .pile-info { background: #25262b; padding: 10px; border-radius: 8px; }
+        
+        /* 手牌区域 */
+        #hand { display: flex; flex-wrap: wrap; gap: 10px; padding: 20px; border: 2px dashed #444; min-height: 250px; }
+       .card-wrapper { position: relative; width: 120px; cursor: pointer; transition: 0.2s; }
+       .card-img { width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+       .card-wrapper.facedown.card-img { filter: brightness(0.2) sepia(1) hue-rotate(140deg); }
+       .card-wrapper.facedown::after { content: "盖下"; position: absolute; top: 40%; left: 30%; background: red; color: white; padding: 2px 5px; font-size: 12px; }
+        
+        button { padding: 8px 15px; background: #339af0; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px 0; width: 100%; }
+        button:hover { background: #228be6; }
+       .btn-danger { background: #fa5252; }
+    </style>
+</head>
+<body>
+
+    <div id="setup">
+        <b>1. 输入 Decklist (每行一个 Slug):</b>
+        <textarea id="deckInput">crescent-glaive
+spirit-shard
+lorraine-wandering-warrior
+spirit-shard</textarea>
+        <button onclick="initGame()">生成并开始游戏</button>
+    </div>
+
+    <div class="game-area">
+        <div class="pile-info">
+            <div id="deckStat">牌库: 0</div>
+            <button onclick="drawCard()">抽取 1 张</button>
+            <div class="divider" style="margin: 15px 0; border-top: 1px solid #444;"></div>
+            <button class="btn-danger" onclick="discardRandomFacedown()">随机丢弃一张盖牌</button>
+            <div id="graveStat" style="margin-top: 20px; color: #888;">坟场: 0</div>
+        </div>
+
+        <div id="hand">
+            </div>
+    </div>
+
+    <script>
+        let deck =;
+        let hand =;
+        let graveyard =;
+
+        // 初始化游戏 
+        function initGame() {
+            const input = document.getElementById('deckInput').value;
+            const slugs = input.split('\n').filter(s => s.trim()!== "");
+            
+            // 生成卡组对象
+            deck = slugs.map(slug => ({
+                slug: slug.trim(),
+                isFaceDown: false,
+                id: Math.random() // 给每张卡一个随机 ID 方便操作
+            }));
+
+            // 洗牌 (Fisher-Yates) 
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
+            }
+
+            hand =;
+            graveyard =;
+            render();
+            alert("卡组已生成并洗牌！");
+        }
+
+        // 抽牌逻辑
+        function drawCard() {
+            if (deck.length === 0) return alert("牌库已空！");
+            const card = deck.pop();
+            hand.push(card);
+            render();
+        }
+
+        // 切换盖牌状态
+        function toggleFaceDown(index) {
+            hand[index].isFaceDown =!hand[index].isFaceDown;
+            render();
+        }
+
+        // 丢弃指定卡牌 
+        function discard(index) {
+            const card = hand.splice(index, 1);
+            graveyard.push(card);
+            render();
+        }
+
+        // 核心功能：随机丢弃盖牌
+        function discardRandomFacedown() {
+            const facedownIndices = hand.map((c, i) => c.isFaceDown? i : -1).filter(i => i!== -1);
+            if (facedownIndices.length === 0) return alert("手上没有盖下的牌！");
+            
+            const randomIndex = facedownIndices[Math.floor(Math.random() * facedownIndices.length)];
+            const card = hand.splice(randomIndex, 1);
+            graveyard.push(card);
+            render();
+            alert("已随机丢弃一张盖牌！");
+        }
+
+        // 渲染界面
+        function render() {
+            document.getElementById('deckStat').innerText = `牌库: ${deck.length}`;
+            document.getElementById('graveStat').innerText = `坟场: ${graveyard.length}`;
+            
+            const handDiv = document.getElementById('hand');
+            handDiv.innerHTML = "";
+
+            hand.forEach((card, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = `card-wrapper ${card.isFaceDown? 'facedown' : ''}`;
+                
+                // 拼接官方图片地址 [4]
+                // 这里的逻辑：左键点击“翻面”，右键点击“丢弃”
+                wrapper.innerHTML = `
+                    <img class="card-img" src="https://api.gatcg.com/cards/images/${card.slug}-doap.jpg?rounded=true" 
+                         onclick="toggleFaceDown(${index})" 
+                         oncontextmenu="event.preventDefault(); discard(${index})">
+                    <div style="font-size: 10px; text-align: center;">右键丢弃</div>
+                `;
+                handDiv.appendChild(wrapper);
+            });
+        }
+    </script>
+</body>
+</html>
