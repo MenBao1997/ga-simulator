@@ -1,231 +1,264 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Image as ImageIcon, Activity, Info, CheckCircle, AlertCircle, Terminal, Link as LinkIcon, ExternalLink } from 'lucide-react';
+import { Search, Image as ImageIcon, Terminal, Database, BookOpen, Clipboard, Play, AlertCircle, FileText } from 'lucide-react';
 
 const App = () => {
-  const BASE_URL = "https://api.gatcg.com/cards/images/";
-  const defaultSlug = 'lorraine-wandering-warrior-doap';
+  const API_BASE = "https://api.gatcg.com";
+  const IMAGE_BASE = "https://api.gatcg.com/cards/images";
 
-  // 状态管理
-  const [searchInput, setSearchInput] = useState(defaultSlug);
-  const [activeUrl, setActiveUrl] = useState("");
-  const [imageStatus, setImageStatus] = useState('pending');
+  // 默认导入范例文本
+  const defaultDeckText = `# Material Deck
+1 Spirit of Water
+1 Diao Chan, Enchantress
+1 Backup Charger
+1 Enfeebling Orb
+
+# Main Deck
+4 Fractal of Insight
+4 Shimmering Refraction
+4 Burst Asunder
+4 Frostsworn Paladin
+
+# Sideboard
+1 Censer of Restful Peace
+1 Nullifying Mirror
+
+# https://silv.ie/deck/order-censer-random/6`;
+
+  const [rawInput, setRawInput] = useState(defaultDeckText);
+  const [decks, setDecks] = useState({ material: [], main: [], side: [] });
+  const [activeCard, setActiveCard] = useState(null);
+  const [activeImageUrl, setActiveImageUrl] = useState("");
+  const [imageStatus, setImageStatus] = useState('idle');
   const [logs, setLogs] = useState([]);
 
-  // 核心日志记录器：记录完整请求链接
-  const addLog = (msg, type = 'info', link = "") => {
+  // 日志记录
+  const addLog = (msg, type = 'info', detail = "") => {
     setLogs(prev => [{
       time: new Date().toLocaleTimeString(),
       msg,
-      link,
+      detail,
       type
     }, ...prev].slice(0, 15));
   };
 
-  // 统一请求触发器
-  const triggerRequest = (slug) => {
-    const cleanSlug = slug.trim().replace(/\.jpg$/i, '');
-    const finalUrl = `${BASE_URL}${cleanSlug}.jpg`;
-    
-    setActiveUrl(finalUrl);
-    setImageStatus('loading');
-    addLog("发起 HTTP GET 请求", 'info', finalUrl);
+  // 解析 Omnidex 格式文本
+  const parseDecklist = (text) => {
+    const lines = text.split('\n');
+    const material = [];
+    const main = [];
+    const side = [];
+    let currentSection = null;
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('https://')) return;
+
+      if (trimmed.startsWith('#')) {
+        const header = trimmed.toLowerCase();
+        if (header.includes('material')) currentSection = 'material';
+        else if (header.includes('main')) currentSection = 'main';
+        else if (header.includes('side')) currentSection = 'side';
+        return;
+      }
+
+      // 提取数量和名称 (例如 "4 Fractal of Insight" -> count: 4, name: "Fractal of Insight")
+      const match = trimmed.match(/^(\d+)\s+(.+)$/);
+      if (match && currentSection) {
+        const entry = { count: parseInt(match[1]), name: match[2] };
+        if (currentSection === 'material') material.push(entry);
+        else if (currentSection === 'main') main.push(entry);
+        else if (currentSection === 'side') side.push(entry);
+      }
+    });
+
+    setDecks({ material, main, side });
+    addLog(`解析成功: Material(${material.length}), Main(${main.length}), Side(${side.length})`, 'success');
   };
 
-  // 网页首次加载时的初始化逻辑
+  // 核心检索逻辑 (包含路径去重修正)
+  const fetchCardImage = async (cardName) => {
+    setActiveCard(cardName);
+    setImageStatus('searching');
+    addLog(`正在检索卡牌: ${cardName}`);
+
+    try {
+      const searchUrl = `${API_BASE}/cards/search?name=${encodeURIComponent(cardName)}`;
+      const response = await fetch(searchUrl);
+      const result = await response.json();
+
+      if (!result.data || result.data.length === 0) {
+        throw new Error("API 未找到此卡牌");
+      }
+
+      const card = result.data[0];
+      const rawImage = card.editions?.[0]?.image;
+
+      if (!rawImage) throw new Error("此卡牌无图像字段");
+
+      // 路径去重逻辑：提取最后的文件名
+      const fileName = rawImage.includes('/') ? rawImage.split('/').pop() : rawImage;
+      const finalUrl = `${IMAGE_BASE}/${fileName}`;
+
+      addLog(`找到文件: ${fileName}`, 'success', finalUrl);
+      setActiveImageUrl(finalUrl);
+      setImageStatus('loading');
+    } catch (err) {
+      addLog(`错误: ${err.message}`, 'error');
+      setImageStatus('error');
+    }
+  };
+
+  // 初始解析
   useEffect(() => {
-    addLog("系统初始化：正在加载默认资源...");
-    triggerRequest(defaultSlug);
+    parseDecklist(rawInput);
   }, []);
 
-  const handleSearch = (e) => {
-    if (e) e.preventDefault();
-    triggerRequest(searchInput);
-  };
-
   return (
-    <div className="min-h-screen bg-[#121212] text-[#e0e0e0] font-sans p-4 md:p-8">
-      <header className="max-w-6xl mx-auto mb-8 border-b border-white/5 pb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-3 text-white">
-          <Terminal className="text-indigo-500" />
-          Grand Archive API 链路深度诊断工具
-        </h1>
-        <p className="text-[#666] text-xs mt-2 uppercase tracking-widest">Diagnostic Mode v2.1 - Full URL Disclosure</p>
+    <div className="min-h-screen bg-[#0d0d0f] text-[#ced4da] font-sans p-4 lg:p-8">
+      <header className="max-w-7xl mx-auto mb-8 flex items-center justify-between border-b border-white/5 pb-6">
+        <div>
+          <h1 className="text-2xl font-black text-white flex items-center gap-3">
+            <BookOpen className="text-indigo-500" />
+            Omnidex Deck 导入与诊断系统
+          </h1>
+          <p className="text-gray-500 text-xs mt-1 font-mono uppercase tracking-widest italic text-indigo-400">Standard: GATCG Omnidex Import Pattern</p>
+        </div>
+        <div className="hidden md:block text-[10px] font-mono text-gray-600 bg-white/5 px-3 py-1 rounded">
+          STATUS: READY_FOR_IMPORT
+        </div>
       </header>
 
-      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* 左侧：动态请求核心 (7列) */}
-        <section className="lg:col-span-7 space-y-6">
-          <div className="bg-[#1e1e1e] p-6 rounded-2xl shadow-2xl border border-white/5">
-            <h2 className="text-sm font-bold mb-4 flex items-center gap-2 text-indigo-400 uppercase tracking-wider">
-              <Activity size={16} />
-              动态请求监控
+        {/* 左侧：输入与解析列表 (5列) */}
+        <section className="lg:col-span-5 space-y-6">
+          <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 shadow-2xl">
+            <h2 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2">
+              <Clipboard size={14} /> 粘贴 Decklist
             </h2>
-            
-            <form onSubmit={handleSearch} className="flex gap-2 mb-6">
-              <input 
-                type="text" 
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="输入 Slug 名..."
-                className="flex-1 bg-[#252525] border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition font-mono"
-              />
-              <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
-                <ExternalLink size={14} /> 发送请求
-              </button>
-            </form>
+            <textarea 
+              value={rawInput}
+              onChange={(e) => setRawInput(e.target.value)}
+              className="w-full h-48 bg-[#1c1c21] border border-white/10 rounded-lg p-3 text-xs font-mono text-gray-300 focus:ring-1 focus:ring-indigo-500 outline-none resize-none"
+              placeholder="# Material Deck..."
+            />
+            <button 
+              onClick={() => parseDecklist(rawInput)}
+              className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2"
+            >
+              <Play size={14} /> 导入并解析
+            </button>
+          </div>
 
-            {/* 图像显示区域 */}
-            <div className="bg-[#0f0f0f] aspect-[5/7] rounded-xl flex items-center justify-center relative overflow-hidden border border-white/5 shadow-inner group">
-              {imageStatus === 'loading' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-[#121212]/80 z-10 backdrop-blur-sm">
+          {/* 解析后的结果展示 */}
+          <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 max-h-[500px] overflow-y-auto space-y-6">
+            <DeckSection title="Material Deck" cards={decks.material} onCardClick={fetchCardImage} activeCard={activeCard} color="text-indigo-400" />
+            <DeckSection title="Main Deck" cards={decks.main} onCardClick={fetchCardImage} activeCard={activeCard} color="text-green-400" />
+            <DeckSection title="Sideboard" cards={decks.side} onCardClick={fetchCardImage} activeCard={activeCard} color="text-yellow-400" />
+          </div>
+        </section>
+
+        {/* 右侧：预览与日志 (7列) */}
+        <section className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* 图像预览 */}
+          <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 flex flex-col min-h-[500px]">
+            <h2 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2">
+              <ImageIcon size={14} /> 卡牌预览
+            </h2>
+            <div className="flex-1 bg-black rounded-lg relative overflow-hidden flex items-center justify-center border border-white/5">
+              {(imageStatus === 'searching' || imageStatus === 'loading') && (
+                <div className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center">
                   <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
                 </div>
               )}
-              
-              {activeUrl && (
+              {activeImageUrl && (
                 <img 
-                  key={activeUrl}
-                  src={activeUrl}
+                  key={activeImageUrl}
+                  src={activeImageUrl}
                   alt="预览"
-                  className={`max-h-full object-contain rounded-lg transition-all duration-300 ${imageStatus === 'loaded' ? 'opacity-100 scale-100' : 'opacity-20 scale-95'}`}
-                  onLoad={() => {
-                    setImageStatus('loaded');
-                    addLog("渲染成功：浏览器已接收图像数据", 'success', activeUrl);
-                  }}
+                  className={`max-w-full h-auto object-contain transition-opacity duration-300 ${imageStatus === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+                  onLoad={() => setImageStatus('loaded')}
                   onError={() => {
                     setImageStatus('error');
-                    addLog("渲染失败：服务器返回 4xx/5xx 或网络阻断", 'error', activeUrl);
+                    addLog("渲染失败: 404", 'error', activeImageUrl);
                   }}
                 />
               )}
-
-              {imageStatus === 'error' && (
-                <div className="text-center p-6 z-20">
-                  <AlertCircle size={40} className="mx-auto text-red-500 mb-2" />
-                  <p className="text-sm text-red-400 font-bold">IMAGE_LOAD_FAILED</p>
+              {!activeImageUrl && imageStatus === 'idle' && (
+                <div className="text-gray-800 text-center p-8">
+                  <ImageIcon size={48} className="mx-auto mb-2 opacity-10" />
+                  <p className="text-[10px] uppercase font-mono tracking-widest">请选择一张卡牌预览</p>
                 </div>
               )}
             </div>
-
-            {/* 当前活跃链接展示 */}
-            <div className="mt-4 p-3 bg-black/40 rounded-lg border border-white/5">
-              <div className="text-[10px] text-gray-500 mb-1 font-bold">CURRENT ACTIVE LINK:</div>
-              <div className="text-xs font-mono text-indigo-300 break-all">{activeUrl || "None"}</div>
-            </div>
+            {activeImageUrl && (
+              <div className="mt-4 p-3 bg-black/40 rounded border border-white/5">
+                <p className="text-[9px] text-gray-600 mb-1 font-bold">REQ_URL (已修正):</p>
+                <p className="text-[10px] font-mono text-indigo-300 break-all select-all">{activeImageUrl}</p>
+              </div>
+            )}
           </div>
 
-          {/* 实时诊断日志堆栈 (根据要求展示完整 Link) */}
-          <div className="bg-[#1e1e1e] rounded-2xl border border-white/5 overflow-hidden shadow-xl">
-            <div className="bg-black/40 px-4 py-2 border-b border-white/5 flex justify-between items-center">
-              <span className="text-xs font-bold text-gray-400 flex items-center gap-2 uppercase">
-                <Terminal size={14} /> 请求堆栈日志 (完整 Link)
-              </span>
-              <button onClick={() => setLogs([])} className="text-[10px] text-gray-600 hover:text-gray-400 transition">CLEAR_LOGS</button>
+          {/* 实时诊断日志 */}
+          <div className="bg-[#16161a] rounded-xl border border-white/5 flex flex-col overflow-hidden h-[500px]">
+            <div className="bg-white/5 px-4 py-3 border-b border-white/5 flex justify-between items-center text-xs font-bold text-gray-500">
+              <Terminal size={14} /> 链路日志
             </div>
-            <div className="p-4 h-64 overflow-y-auto font-mono text-[11px] space-y-3">
-              {logs.length === 0 && <div className="text-gray-700 italic">等待数据中...</div>}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[10px]">
               {logs.map((log, i) => (
                 <div key={i} className={`p-2 rounded border-l-2 ${
                   log.type === 'error' ? 'bg-red-500/5 border-red-500 text-red-400' : 
                   log.type === 'success' ? 'bg-green-500/5 border-green-500 text-green-400' : 
-                  'bg-white/5 border-gray-600 text-gray-300'
+                  'bg-white/5 border-indigo-500/20 text-gray-400'
                 }`}>
-                  <div className="flex justify-between opacity-70 mb-1">
-                    <span>{log.msg}</span>
-                    <span>{log.time}</span>
+                  <div className="flex justify-between mb-1">
+                    <span className="font-bold">{log.msg}</span>
+                    <span className="opacity-40">{log.time}</span>
                   </div>
-                  {log.link && (
-                    <div className="break-all text-blue-400/80 mt-1 select-all underline underline-offset-2">
-                      {log.link}
-                    </div>
-                  )}
+                  {log.detail && <div className="break-all opacity-50 mt-1 select-all">{log.detail}</div>}
                 </div>
               ))}
-            </div>
-          </div>
-        </section>
-
-        {/* 右侧：静态基准参照 (5列) */}
-        <section className="lg:col-span-5 space-y-6">
-          
-          <div className="bg-[#1e1e1e] p-6 rounded-2xl shadow-2xl border border-green-500/20">
-            <div className="flex justify-between items-start mb-4">
-              <h2 className="text-sm font-bold flex items-center gap-2 text-green-400 uppercase tracking-wider">
-                <CheckCircle size={16} />
-                静态参考基准 (Lorraine)
-              </h2>
-              <span className="bg-green-500/10 text-green-500 text-[10px] px-2 py-0.5 rounded border border-green-500/20">SUCCESS_CASE</span>
-            </div>
-            
-            <div className="bg-[#0f0f0f] p-4 rounded-xl text-center border border-white/5 shadow-inner">
-              <img 
-                src="https://api.gatcg.com/cards/images/lorraine-wandering-warrior-doap.jpg" 
-                alt="Lorraine 静态基准"
-                className="max-w-full h-auto rounded-lg mx-auto shadow-2xl border border-white/5"
-                style={{ borderRadius: '8px' }}
-              />
-              <div className="mt-4 p-3 bg-black/40 rounded text-left">
-                <p className="text-[10px] text-gray-500 font-bold mb-1 uppercase">Hardcoded Link:</p>
-                <div className="text-[11px] font-mono text-gray-400 break-all">
-                  https://api.gatcg.com/cards/images/lorraine-wandering-warrior-doap.jpg
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 排查指南 */}
-          <div className="bg-indigo-600/5 border border-indigo-500/20 p-6 rounded-2xl">
-            <h3 className="text-xs font-bold text-indigo-400 uppercase mb-4 tracking-widest">排查指令集</h3>
-            <div className="space-y-3 text-[11px] text-gray-400 leading-relaxed">
-              <p>1. 如果静态区图片显示，但动态区报错：</p>
-              <p className="pl-4 border-l border-white/10 italic">对比下方日志中的 <span className="text-blue-400">Blue Link</span> 与右侧 <span className="text-gray-400 font-bold">Hardcoded Link</span> 的每一个字符（包括大小写和横杠）。</p>
-              
-              <p className="mt-4">2. 推荐测试用例 (点击填入并观察日志):</p>
-              <div className="flex flex-wrap gap-2">
-                {['rai-sanguine-static-doap', 'silvie-slime-sovereign-doap'].map(s => (
-                  <button 
-                    key={s}
-                    onClick={() => { setSearchInput(s); triggerRequest(s); }}
-                    className="bg-white/5 hover:bg-white/10 px-2 py-1 rounded border border-white/10 text-indigo-300 transition"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
 
         </section>
       </main>
 
-      <footer className="max-w-6xl mx-auto mt-12 py-8 border-t border-white/5 text-center">
-        <div className="flex justify-center gap-6 mb-4">
-          <div className="flex items-center gap-2 text-[10px] text-gray-600">
-            <span className="w-2 h-2 rounded-full bg-green-500"></span> 接口: api.gatcg.com 
-          </div>
-          <div className="flex items-center gap-2 text-[10px] text-gray-600">
-            <span className="w-2 h-2 rounded-full bg-indigo-500"></span> 协议: HTTPS/TLS 1.3
-          </div>
-        </div>
-        <p className="text-[#444] text-[9px] font-mono uppercase tracking-widest">
-          Grand Archive Research & Debugging Interface | Created for Asset Verification
-        </p>
+      <footer className="max-w-7xl mx-auto mt-8 py-6 border-t border-white/5 text-center text-[10px] text-gray-700 font-mono">
+         | ENDPOINT: api.gatcg.com
       </footer>
     </div>
   );
 };
 
+// 子组件：卡组列表展示
+const DeckSection = ({ title, cards, onCardClick, activeCard, color }) => {
+  if (cards.length === 0) return null;
+  return (
+    <div>
+      <h3 className={`text-[10px] font-black uppercase tracking-widest mb-3 ${color} border-b border-white/5 pb-1`}>
+        {title} ({cards.reduce((acc, c) => acc + c.count, 0)})
+      </h3>
+      <div className="space-y-1">
+        {cards.map((card, i) => (
+          <button 
+            key={i}
+            onClick={() => onCardClick(card.name)}
+            className={`w-full text-left px-2 py-1.5 rounded text-[11px] flex items-center justify-between transition group ${
+              activeCard === card.name ? 'bg-indigo-500/20 text-white' : 'hover:bg-white/5 text-gray-400'
+            }`}
+          >
+            <span className="truncate flex items-center gap-2">
+              <span className="text-gray-600 font-bold w-4">{card.count}</span>
+              {card.name}
+            </span>
+            <Search size={10} className="opacity-0 group-hover:opacity-100 transition" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default App;
-
-/* Application Structure Plan:
-1. 诊断核心：实现 triggerRequest 函数，强制所有图片操作（初次加载+手动搜索）都通过它，确保日志中记录的是最终生成的、发送给浏览器的完整绝对路径。
-2. 日志增强：日志卡片现在具有更高的对比度，成功/失败/信息状态有明确的左侧边框颜色，且 URL 链接以蓝色高亮显示，方便肉眼识别。
-3. 首屏展示：利用 useEffect 在 Mount 时立即触发一次对默认 Slug 的请求，从而让日志的第一行就显示启动时的完整 Link。
-4. 视觉优化： 使用了透明度动画和微缩放，强调“状态更新”的反馈感。
-
-Verification Logic:
-- 如果用户点击搜索，日志会新增一条记录。
-- 无论 onLoad 还是 onError，都会再次在日志中打印该请求对应的 Link，并标注结果。
-- 确认：代码中没有使用 SVG 图像资源或 Mermaid JS。
-*/
