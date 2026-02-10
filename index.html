@@ -2,66 +2,58 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Grand Archive 自动抓取测试</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grand Archive TCG 卡牌展示器</title>
     <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 50px; }
-       .container { background: #2d2d2d; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        #cardImage { max-width: 300px; border-radius: 12px; display: none; margin: 20px auto; border: 3px solid #444; }
-        #status { color: #aaa; font-style: italic; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background-color: #f4f4f9; }
+       .controls { margin-bottom: 20px; }
+        input { padding: 8px; width: 250px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 8px 15px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background-color: #0056b3; }
+        #card-container { margin-top: 20px; min-height: 400px; }
+        img { max-width: 350px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: opacity 0.3s; }
+       .error { color: red; margin-top: 10px; }
+       .loading { color: #666; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>GA 自动抓取示范</h2>
-        <p id="status">正在同步官方数据 (crescent-glaive)...</p>
-        
-        <img id="cardImage" src="" alt="卡牌图片">
-        
-        <p id="cardName" style="font-weight: bold; font-size: 18px;"></p>
+    <h1>卡牌图像展示</h1>
+    
+    <div class="controls">
+        <input type="text" id="card-slug" placeholder="输入卡牌 Slug (如: crescent-glaive)" value="crescent-glaive">
+        <button onclick="fetchAndShowCard()">展示图片</button>
     </div>
 
+    <div id="card-container">
+        </div>
+
     <script>
-        // 页面一旦加载完毕，就立即执行抓取任务
-        window.onload = async function() {
-            const slug = "crescent-glaive"; // 目标卡牌的唯一标识符
-            const status = document.getElementById('status');
-            const img = document.getElementById('cardImage');
-            const nameText = document.getElementById('cardName');
+        async function fetchAndShowCard() {
+            const slug = document.getElementById('card-slug').value.trim();
+            const container = document.getElementById('card-container');
+            
+            if (!slug) return;
+
+            container.innerHTML = '<p class="loading">正在检索元数据...</p>';
 
             try {
-                // 1. 构造官方 API 地址
-                const apiUrl = `https://api.gatcg.com/cards/${slug}`;
+                // 1. 获取卡牌元数据 [1, 2]
+                const metaResponse = await fetch(`https://api.gatcg.com/cards/${slug}`);
                 
-                // 2. 使用代理服务器绕过跨域限制
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`;
-                
-                const response = await fetch(proxyUrl);
-                const data = await response.json();
-                
-                // 3. 解析代理返回的内容
-                const card = JSON.parse(data.contents);
-
-                if (card && card.editions && card.editions.length > 0) {
-                    // 4. 获取第一个版本的图片文件名
-                    const filename = card.editions.image;
-                    
-                    // 5. 拼接带圆角的官方图片地址 
-                    const imageUrl = `https://api.gatcg.com/cards/images/${filename}?rounded=true`;
-
-                    // 6. 渲染到网页上
-                    img.src = imageUrl;
-                    img.onload = () => {
-                        img.style.display = "block";
-                        status.innerText = "抓取成功！数据源：api.gatcg.com";
-                        nameText.innerText = card.name;
-                    };
+                if (!metaResponse.ok) {
+                    throw new Error('未找到该卡牌，请检查 Slug 是否正确');
                 }
-            } catch (error) {
-                console.error(error);
-                status.innerText = "抓取失败，请检查网络或 VPN 状态。";
-            }
-        };
-    </script>
-</body>
-</html>
+
+                const cardData = await metaResponse.json();
+                
+                // 2. 提取第一个版本的图像文件名 [2]
+                // 优先从 editions 数组获取
+                const editions = cardData.editions || cardData.result_editions;
+                if (!editions || editions.length === 0) {
+                    throw new Error('该卡牌没有任何版本数据');
+                }
+                
+                const filename = editions.image;
+                
+                // 3. 构建完整的图像 URL，并开启圆角参数 [[1]
