@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GA Omnidex 模拟器</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 和 Babel CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入 Lucide 图标库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #0d0d0f; color: #ced4da; }
+        .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .card-glow { transition: all 0.3s ease; }
+        .card-glow:hover { box-shadow: 0 0 20px rgba(99, 102, 241, 0.2); border-color: rgba(99, 102, 241, 0.4); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // 简单的 Lucide 图标组件封装
+        const Icon = ({ name, size = 16, className = "" }) => {
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            const API_BASE = "https://api.gatcg.com";
+            const IMAGE_BASE = "https://api.gatcg.com/cards/images";
+
+            const defaultDeckText = `# Material Deck\n1 Spirit of Water\n1 Diao Chan, Enchantress\n1 Backup Charger\n1 Enfeebling Orb\n\n# Main Deck\n4 Fractal of Insight\n4 Shimmering Refraction\n4 Burst Asunder\n4 Frostsworn Paladin\n\n# Sideboard\n1 Censer of Restful Peace\n1 Nullifying Mirror\n\n# https://silv.ie/deck/order-censer-random/6`;
+
+            const [rawInput, setRawInput] = useState(defaultDeckText);
+            const [decks, setDecks] = useState({ material: [], main: [], side: [] });
+            const [activeCard, setActiveCard] = useState(null);
+            const [activeImageUrl, setActiveImageUrl] = useState("");
+            const [imageStatus, setImageStatus] = useState('idle');
+            const [logs, setLogs] = useState([]);
+
+            const addLog = (msg, type = 'info', detail = "") => {
+                setLogs(prev => [{
+                    time: new Date().toLocaleTimeString(),
+                    msg,
+                    detail,
+                    type
+                }, ...prev].slice(0, 15));
+            };
+
+            const parseDecklist = (text) => {
+                const lines = text.split('\n');
+                const material = [];
+                const main = [];
+                const side = [];
+                let currentSection = null;
+
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith('https://')) return;
+
+                    if (trimmed.startsWith('#')) {
+                        const header = trimmed.toLowerCase();
+                        if (header.includes('material')) currentSection = 'material';
+                        else if (header.includes('main')) currentSection = 'main';
+                        else if (header.includes('side')) currentSection = 'side';
+                        return;
+                    }
+
+                    const match = trimmed.match(/^(\d+)\s+(.+)$/);
+                    if (match && currentSection) {
+                        const entry = { count: parseInt(match[1]), name: match[2] };
+                        if (currentSection === 'material') material.push(entry);
+                        else if (currentSection === 'main') main.push(entry);
+                        else if (currentSection === 'side') side.push(entry);
+                    }
+                });
+
+                setDecks({ material, main, side });
+                addLog(`解析成功: Material(${material.length}), Main(${main.length}), Side(${side.length})`, 'success');
+            };
+
+            const fetchCardImage = async (cardName) => {
+                setActiveCard(cardName);
+                setImageStatus('searching');
+                addLog(`正在检索卡牌: ${cardName}`);
+
+                try {
+                    const searchUrl = `${API_BASE}/cards/search?name=${encodeURIComponent(cardName)}`;
+                    const response = await fetch(searchUrl);
+                    const result = await response.json();
+
+                    if (!result.data || result.data.length === 0) throw new Error("API 未找到此卡牌");
+
+                    const card = result.data[0];
+                    const rawImage = card.editions?.[0]?.image;
+
+                    if (!rawImage) throw new Error("此卡牌无图像字段");
+
+                    const fileName = rawImage.includes('/') ? rawImage.split('/').pop() : rawImage;
+                    const finalUrl = `${IMAGE_BASE}/${fileName}`;
+
+                    addLog(`找到文件: ${fileName}`, 'success', finalUrl);
+                    setActiveImageUrl(finalUrl);
+                    setImageStatus('loading');
+                } catch (err) {
+                    addLog(`错误: ${err.message}`, 'error');
+                    setImageStatus('error');
+                }
+            };
+
+            useEffect(() => { parseDecklist(rawInput); }, []);
+
+            return (
+                <div className="min-h-screen p-4 lg:p-8">
+                    <header className="max-w-7xl mx-auto mb-8 flex items-center justify-between border-b border-white/5 pb-6">
+                        <div>
+                            <h1 className="text-2xl font-black text-white flex items-center gap-3">
+                                <Icon name="book-open" className="text-indigo-500" />
+                                GA Omnidex 模拟器
+                            </h1>
+                            <p className="text-gray-500 text-xs mt-1 font-mono uppercase tracking-widest text-indigo-400">Diagnostic Edition</p>
+                        </div>
+                        <div className="hidden md:block text-[10px] font-mono text-gray-600 bg-white/5 px-3 py-1 rounded">
+                            STATUS: OPERATIONAL
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <section className="lg:col-span-5 space-y-6">
+                            <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 shadow-2xl">
+                                <h2 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2">
+                                    <Icon name="clipboard" size={14} /> 导入 Decklist
+                                </h2>
+                                <textarea 
+                                    value={rawInput}
+                                    onChange={(e) => setRawInput(e.target.value)}
+                                    className="w-full h-48 bg-[#1c1c21] border border-white/10 rounded-lg p-3 text-xs font-mono text-gray-300 focus:ring-1 focus:ring-indigo-500 outline-none resize-none"
+                                />
+                                <button 
+                                    onClick={() => parseDecklist(rawInput)}
+                                    className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/10"
+                                >
+                                    <Icon name="play" size={14} /> 解析列表
+                                </button>
+                            </div>
+
+                            <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 max-h-[500px] overflow-y-auto space-y-6 scrollbar-thin">
+                                <DeckSection title="Material Deck" cards={decks.material} onCardClick={fetchCardImage} activeCard={activeCard} color="text-indigo-400" />
+                                <DeckSection title="Main Deck" cards={decks.main} onCardClick={fetchCardImage} activeCard={activeCard} color="text-green-400" />
+                                <DeckSection title="Sideboard" cards={decks.side} onCardClick={fetchCardImage} activeCard={activeCard} color="text-yellow-400" />
+                            </div>
+                        </section>
+
+                        <section className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 flex flex-col min-h-[500px] card-glow">
+                                <h2 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2">
+                                    <Icon name="image" size={14} /> 预览
+                                </h2>
+                                <div className="flex-1 bg-black/40 rounded-lg relative overflow-hidden flex items-center justify-center border border-white/5">
+                                    {imageStatus === 'loading' && <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>}
+                                    {activeImageUrl && (
+                                        <img 
+                                            key={activeImageUrl} 
+                                            src={activeImageUrl} 
+                                            className={`max-h-[450px] object-contain transition-opacity duration-300 ${imageStatus === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+                                            onLoad={() => setImageStatus('loaded')}
+                                            onError={() => setImageStatus('error')}
+                                        />
+                                    )}
+                                </div>
+                                {activeImageUrl && <div className="mt-4 text-[10px] font-mono text-indigo-300 break-all bg-black/40 p-2 rounded">{activeImageUrl}</div>}
+                            </div>
+
+                            <div className="bg-[#16161a] rounded-xl border border-white/5 flex flex-col overflow-hidden h-[500px]">
+                                <div className="bg-white/5 px-4 py-3 border-b border-white/5 text-xs font-bold text-gray-500">诊断日志</div>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[10px]">
+                                    {logs.map((log, i) => (
+                                        <div key={i} className={`p-2 rounded border-l-2 ${log.type === 'error' ? 'bg-red-500/5 border-red-500 text-red-400' : log.type === 'success' ? 'bg-green-500/5 border-green-500 text-green-400' : 'bg-white/5 border-gray-600 text-gray-400'}`}>
+                                            <div className="flex justify-between font-bold"><span>{log.msg}</span><span>{log.time}</span></div>
+                                            {log.detail && <div className="opacity-50 mt-1 break-all">{log.detail}</div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            );
+        };
+
+        const DeckSection = ({ title, cards, onCardClick, activeCard, color }) => {
+            if (cards.length === 0) return null;
+            return (
+                <div className="mb-4">
+                    <h3 className={`text-[10px] font-black uppercase tracking-widest mb-2 pb-1 border-b border-white/5 ${color}`}>{title}</h3>
+                    <div className="space-y-1">
+                        {cards.map((c, i) => (
+                            <button 
+                                key={i} 
+                                onClick={() => onCardClick(c.name)}
+                                className={`w-full text-left px-2 py-1.5 rounded text-[11px] flex justify-between transition ${activeCard === c.name ? 'bg-indigo-500 text-white' : 'hover:bg-white/5 text-gray-400'}`}
+                            >
+                                <span><span className="opacity-40 font-bold mr-2">{c.count}</span>{c.name}</span>
+                                <Icon name="search" size={10} className="opacity-30" />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
