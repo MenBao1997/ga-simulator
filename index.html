@@ -2,81 +2,66 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Grand Archive 图片加载调试</title>
+    <title>Grand Archive 自动抓取测试</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 30px; background: #f5f5f5; }
-       .box { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: inline-block; width: 420px; }
-        input { padding: 12px; width: 200px; border: 1px solid #ddd; border-radius: 6px; }
-        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; }
-       .divider { border-top: 2px solid #eee; margin: 30px 0; padding-top: 20px; }
-        img { max-width: 320px; border-radius: 12px; margin: 15px 0; display: block; margin-left: auto; margin-right: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-        #status { margin: 15px 0; color: #555; font-weight: bold; }
-       .error-hint { font-size: 12px; color: #d9534f; text-align: left; padding: 10px; background: #fff5f5; border-radius: 5px; display: none; }
+        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 50px; }
+       .container { background: #2d2d2d; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #cardImage { max-width: 300px; border-radius: 12px; display: none; margin: 20px auto; border: 3px solid #444; }
+        #status { color: #aaa; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <div class="box">
-        <h3>1. 搜索测试 (通过 API 请求)</h3>
-        <p style="font-size: 13px; color: #888;">输入卡牌英文名并搜索</p>
-        <input type="text" id="cardName" placeholder="例如: Lorraine">
-        <button onclick="searchCard()">搜索</button>
-        <div id="status">状态: 等待操作</div>
-        <div id="searchResult"></div>
-        <div id="errorHint" class="error-hint">
-            <b>如果搜索失败：</b><br>
-            1. 请确保输入的是英文（如 Rai, Spirit Shard）。<br>
-            2. 本地文件运行常因 CORS 安全限制被浏览器拦截。
-        </div>
-
-        <div class="divider">
-            <h3>2. 图片服务器直连测试</h3>
-            <p style="font-size: 13px; color: #888;">如果你能看到下面的图片，说明官方图片库连接正常 </p>
-            <img src="https://api.gatcg.com/cards/images/lorraine-wandering-warrior-doap.jpg?rounded=true" alt="直连测试图片">
-        </div>
+    <div class="container">
+        <h2>GA 自动抓取示范</h2>
+        <p id="status">正在同步官方数据 (crescent-glaive)...</p>
+        
+        <img id="cardImage" src="" alt="卡牌图片">
+        
+        <p id="cardName" style="font-weight: bold; font-size: 18px;"></p>
     </div>
 
     <script>
-        async function searchCard() {
-            const name = document.getElementById('cardName').value;
+        // 页面一旦加载完毕，就立即执行抓取任务
+        window.onload = async function() {
+            const slug = "crescent-glaive"; // 目标卡牌的唯一标识符
             const status = document.getElementById('status');
-            const resultDiv = document.getElementById('searchResult');
-            const errorHint = document.getElementById('errorHint');
-
-            if (!name) return alert("请输入卡牌名");
-
-            status.innerText = "状态: 正在连接官方数据库...";
-            resultDiv.innerHTML = "";
-            errorHint.style.display = "none";
+            const img = document.getElementById('cardImage');
+            const nameText = document.getElementById('cardName');
 
             try {
-                // 使用 allorigins 代理，这是一种非常稳定的绕过本地 CORS 拦截的方式 [1]
-                const proxy = "https://api.allorigins.win/get?url=";
-                const apiUrl = `https://api.gatcg.com/cards/search?name=${encodeURIComponent(name)}`;
+                // 1. 构造官方 API 地址
+                const apiUrl = `https://api.gatcg.com/cards/${slug}`;
                 
-                const response = await fetch(proxy + encodeURIComponent(apiUrl));
-                if (!response.ok) throw new Error("网络请求被拦截或代理服务器繁忙");
+                // 2. 使用代理服务器绕过跨域限制
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`;
                 
-                const wrapper = await response.json();
-                // allorigins 会将真正的 API 结果放在 contents 字段中
-                const result = JSON.parse(wrapper.contents); 
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                
+                // 3. 解析代理返回的内容
+                const card = JSON.parse(data.contents);
 
-                if (result.data && result.data.length > 0) {
-                    const card = result.data; // 获取搜索到的第一张卡
-                    const fileName = card.editions.image; // 从版本信息中提取图片文件名 
-                    const imageUrl = `https://api.gatcg.com/cards/images/${fileName}?rounded=true`; // 拼接图片地址 
+                if (card && card.editions && card.editions.length > 0) {
+                    // 4. 获取第一个版本的图片文件名
+                    const filename = card.editions.image;
+                    
+                    // 5. 拼接带圆角的官方图片地址 
+                    const imageUrl = `https://api.gatcg.com/cards/images/${filename}?rounded=true`;
 
-                    status.innerText = "状态: 成功查找到卡牌！";
-                    resultDiv.innerHTML = `<img src="${imageUrl}"><p><b>卡牌全名:</b> ${card.name}</p>`;
-                } else {
-                    status.innerText = "状态: 未找到该卡牌 (请检查拼写)";
+                    // 6. 渲染到网页上
+                    img.src = imageUrl;
+                    img.onload = () => {
+                        img.style.display = "block";
+                        status.innerText = "抓取成功！数据源：api.gatcg.com";
+                        nameText.innerText = card.name;
+                    };
                 }
-            } catch (err) {
-                console.error(err);
-                status.innerText = "状态: 搜索请求失败";
-                errorHint.style.display = "block";
+            } catch (error) {
+                console.error(error);
+                status.innerText = "抓取失败，请检查网络或 VPN 状态。";
             }
-        }
+        };
     </script>
 </body>
 </html>
